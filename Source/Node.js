@@ -60,6 +60,8 @@ Class.defineMutator('Matches', function(match){
 
 var select = Node.select = function(node){
 	if (node != null){
+		if (node == window) return hostWindow;
+		if (node == document) return hostDocument;
 		if (typeof node == 'string') return select(Slick.find(document, node));
 		if (node instanceof Node) return node;
 		var uid = node.uniqueNumber || Slick.uidOf(node), wrapper = wrappers[uid];
@@ -106,6 +108,8 @@ Document.prototype.toString = function(){
 	return '<document>';
 };
 
+var hostDocument = new Document(document);
+
 // window
 
 var Window = Node.Window = Class({Extends: Node});
@@ -113,6 +117,8 @@ var Window = Node.Window = Class({Extends: Node});
 Window.prototype.toString = function(){
 	return '<window>';
 };
+
+var hostWindow = new Window(window);
 
 // element
 
