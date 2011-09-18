@@ -3,242 +3,263 @@ define([
 	'Base/Core/Accessor',
 	'Base/Utility/typeOf',
 	'./Node',
+	'./Event',
 	'Slick/Finder'
-], function(Accessor, typeOf, Node, Slick){
+], function(Accessor, typeOf, Node, DOMEvent, Slick){
 
-// TODO: cpojer: make a nice DOMEvent (based on Class?)
-var DOMEvent = function(event){
-	this.event = event;
-	this.capture = false;
-	if (event){
-		var type = this.type = event.type;
-
-		var target = event.target || event.srcElement;
-		while (target && target.nodeType == 3) target = target.parentNode;
-		this.target = Node.select(target);
-
-		if (type == 'mouseover' || type == 'mouseout'){
-			var related = event.relatedTarget || event[(type == 'mouseover' ? 'from' : 'to') + 'Element'];
-			while (related && related.nodeType == 3) related = related.parentNode;
-			this.relatedTarget = Node.select(related);
-		}
-	}
-};
-
-DOMEvent.prototype.stop = function(){
-	this.stopped = true;
-	return this;
-};
-
-DOMEvent.prototype.prevent = function(){
-	if (this.event.preventDefault) this.event.preventDefault();
-	else this.event.returnValue = false;
-	return this;
-};
-
-DOMEvent.prototype.kill = function(){
-	return this.stop().prevent();
-};
+// we need to find a way for this.
+// need to find a definite format for this, maybe has('dev')
+// http://requirejs.org/docs/optimization.html#hasjs
+var __DEV__ = true;
 
 // Not rely directly on Slick?
-var _match = Slick.match;
+var _match = Slick.match,
 
-var root = document.body,
-	rootParent = root.parentNode;
+	select = Node.select,
+	html = document.documentElement, // real DOM elements
+	_html = select(html), // wrapped element, prefixed with a _
 
-// feature detections
-var hasEventListener = !!root.addEventListener,
-	hasMousewheel = 'onmousewheel' in root;
+	// feature detections
+	hasEventListener = !!html.addEventListener,
+	hasMousewheel = 'onmousewheel' in html,
 
-// add / remove listeners
-var addEventListener = hasEventListener ? function(element, type, fn, useCapture){
-	element.addEventListener(type, fn, useCapture);
-} : function(element, type, fn){
-	element.attachEvent('on' + type, fn);
-};
+	addEventListener = hasEventListener ? function(node, type, fn, useCapture){
+		node.addEventListener(type, fn, !!useCapture);
+	} : function(node, type, fn){
+		node.attachEvent('on' + type, fn);
+	},
 
-var removeEventListener = hasEventListener ? function(element, type, fn, useCapture){
-	element.removeEventListener(type, fn, useCapture);
-} : function(element, type, fn){
-	element.detachEvent('on' + type, fn);
-};
+	removeEventListener = hasEventListener ? function(node, type, fn, useCapture){
+		node.removeEventListener(type, fn, useCapture);
+	} : function(node, type, fn){
+		node.detachEvent('on' + type, fn);
+	},
 
-// fake bubbling
-var bubble = function(fn, matcher, event){
-	// getting the bubbling path
-	var path = [];
-	for (var target = event.target.valueOf(); target && target != rootParent; target = target.parentNode){
-		var _target = Node.select(target);
-		if (matcher(_target, event)) path.push(_target);
-	}
-	// using the path
-	var capture = false, // make it an argument or something?
-		l = path.length, i = 0;
-	if (capture){
-		_event.capture = true;
-		for (i = l; i-- && !event.stopped;) fn.call(path[i], event);
-	} else {
-		for (; i < l && !event.stopped; i++) fn.call(path[i], event);
-	}
-};
+	// find the matcher and/or function, O(n)?
+	// we wouldn't need this if addEvent would return an object: {fire: fn, remove: fn}
+	// then we don't have to add this indexOf() check in addEvent to prevent duplicates
+	indexOf = function(event, matcher, fn){
+		var fns = event.fns, matchers = event._matchers,
+			i = 0, l = fns.length;
+		if (matcher && fn) for (; i < l; i++){
+			if (fn == fns[i] && matcher == matchers[i]) return i;
+		} else if (matcher) for (; i < l; i++){
+			if (matcher == matchers[i]) return i;
+		} else if (fn) for (; i < l; i++){
+			if (fn == fns[i]) return i;
+		}
+		return -1;
+	},
 
-/*
-var events = {
-	click: [{
-		fns: [],		// the passed function
-		matchers: [],	// the matcher function
-		_matchers: [],	// the passed matcher (fn, element, node)
-		listener: fn	// the one passed into addEventListener
-	}]
-}
-*/
-var events = {};
+	simpleSelectorMatch = /^(\.|#)?(\w+)$/i;
 
-// find the matcher and/or function
-var indexOf = function(event, matcher, fn){
-	var fns = event.fns, matchers = event._matchers,
-		i = 0, l = fns.length;
-	if (matcher && fn) for (; i < l; i++){
-		if (fn == fns[i] && matcher == matchers[i]) return i;
-	} else if (matcher) for (; i < l; i++){
-		if (matcher == matchers[i]) return i;
-	} else if (fn) for (; i < l; i++){
-		if (fn == fns[i]) return i;
-	}
-	return -1;
-};
+Node.implement({
 
-var simpleSelectorMatch = /^(\.|#)?(\w+)$/i;
+	addEventListener: function(type, fn, useCapture){
+		addEventListener(this.node, type, fn, useCapture);
+		return this;
+	},
 
-var add = function(type, matcher, fn){
-	var _event = events[type];
+	removeEventListener: function(type, fn, useCapture){
+		removeEventListener(this.node, type, fn, useCapture);
+		return this;
+	},
 
-	var custom = Events.lookupCustom(type);
-	if (custom && custom.base) type = custom.base;
+	addEvent: function(type, matcher, fn){
+		/* {
+			click: [{
+				fns: [],		// the passed function
+				matchers: [],	// the matcher function
+				_matchers: [],	// the passed matcher (fn, element, node)
+				listener: fn	// the one passed into addEventListener
+			}],
+			submit: [...]
+		} */
+		var events = this.retrieve('_events', {}),
+			_event = events[type];
 
-	if (_event){
-		// prevent functions to be added twice
-		var index = indexOf(_event, matcher, fn);
-		if (index != -1) return this;
-	} else {
-		// first time for this type of event: so add a listener
-		_event = events[type] = {matchers: [], _matchers: [], fns: []};
-		var listener = _event.listener = function(event){
-			var fns = _event.fns, matchers = _event.matchers;
-			for (var i = 0, l = fns.length; i < l; i++) bubble(fns[i], matchers[i], new DOMEvent(event));
-		};
-		addEventListener(root, type, listener, !!(custom && custom.capture));
-	}
+		if (!fn){
+			fn = matcher;
+			matcher = true;
+		}
 
-	// supported matchers: selector string, (wrapped) node or (native) element
-	var _matcher = matcher;
-	if (typeof matcher == 'string'){
-		// Some matcher optimalization for simple selectors (tagname, class, id)
-		var selectorMatch = matcher.match(simpleSelectorMatch);
-		if (selectorMatch){
-			if (!selectorMatch[1]){
-				var tag = selectorMatch[2].toLowerCase();
+		if (__DEV__){
+			if (typeof fn != 'function') throw new Error('The function argument must be a function');
+		}
+
+		var custom = Events.lookup(type);
+		if (custom && custom.base) type = custom.base;
+
+		if (_event){
+			// prevent functions to be added twice
+			var index = indexOf(_event, matcher, fn);
+			if (index != -1) return this;
+		} else {
+			// first time for this type of event: so add a listener
+			_event = events[type] = {matchers: [], _matchers: [], fns: []};
+			var _self = this;
+			var listener = _event.listener = function(event){
+				_self.fireEvent(type, event);
+			};
+			this.addEventListener(type, listener, !!(custom && custom.capture));
+		}
+
+		// supported matchers: selector string, (wrapped) node or (native) element
+		var _matcher = matcher;
+		if (typeof matcher == 'string'){
+			// Some matcher optimalization for simple selectors (tagname, class, id)
+			var selectorMatch = matcher.match(simpleSelectorMatch);
+			if (selectorMatch){
+				if (!selectorMatch[1]){
+					var tag = selectorMatch[2].toLowerCase();
+					matcher = function(element){
+						return element.get('tag') == tag;
+					};
+				} else if (selectorMatch[1] == '.'){
+					var className = selectorMatch[2];
+					matcher = function(element){
+						return element.hasClass(className);
+					};
+				} else if (selectorMatch[1] == '#'){
+					var id = selectorMatch[2];
+					matcher = function(element){
+						return element.get('id') == id;
+					};
+				}
+			} else {
+				// more complex selectors
 				matcher = function(element){
-					return element.get('tag') == tag;
-				};
-			} else if (selectorMatch[1] == '.'){
-				var className = selectorMatch[2];
-				matcher = function(element){
-					return element.hasClass(className);
-				};
-			} else if (selectorMatch[1] == '#'){
-				var id = selectorMatch[2];
-				matcher = function(element){
-					return element.get('id') == id;
+					_match(element, _matcher);
 				};
 			}
-		} else {
-			// more complex selectors
+		} else if (matcher instanceof Node){
 			matcher = function(element){
-				_match(element, _matcher);
+				return element == _matcher;
+			};
+		} else if (matcher instanceof Node.Elements){
+			matcher = function(element){
+				return _matcher.contains(element);
+			};
+		} else if (typeOf(matcher) == 'element'){
+			var _element = Node.select(matcher);
+			matcher = function(element){
+				return element == _element;
 			};
 		}
-	} else if (matcher instanceof Node){
-		matcher = function(element){
-			return element == _matcher;
-		};
-	} else if (typeOf(matcher) == 'element'){
-		var _element = Node.select(matcher);
-		matcher = function(element){
-			return element == _element;
-		};
-	}
 
-	if (custom && custom.condition){
-		var __matcher = matcher;
-		matcher = function(element, event){
-			return __matcher(element) && custom.condition(element, event);
+		if (custom && custom.condition){
+			var __matcher = matcher;
+			matcher = function(element, event){
+				return __matcher(element) && custom.condition(element, event);
+			}
 		}
-	}
 
-	if (custom && custom.onAdd) custom.onAdd();
+		if (custom && custom.onAdd) custom.onAdd(this, fn);
 
-	_event.matchers.push(matcher);
-	_event._matchers.push(_matcher)
-	_event.fns.push(fn);
+		_event.matchers.push(matcher);
+		_event._matchers.push(_matcher)
+		_event.fns.push(fn);
 
-	return this;
-};
+		return this;
+	},
 
-var remove = function(type, matcher, fn){
-	var custom = Events.lookupCustom(type);
-	if (custom && custom.base) type = custom.base;
+	removeEvent: function(type, matcher, fn){
+		var events = this.retrieve('_events');
+		if (!events) return this;
 
-	var _event = events[type];
-	var i = _event ? indexOf(_event, matcher, fn) : -1;
-	if (i != -1){
+		var custom = Events.lookup(type);
+		if (custom && custom.base) type = custom.base;
 
-		if (custom && custom.onRemove) custom.onRemove();
+		var _event = events[type];
 
-		_event.matchers.splice(i, 1);
-		_event._matchers.splice(i, 1);
-		_event.fns.splice(i, 1);
-	}
-	if (!_event.fns.length){
-		removeEventListener(root, type, _event.listener, !!(custom && custom.capture));
-		delete events[type];
-	}
-	return this;
-};
+		if (!matcher && !fn){
+			var fns = event.fns, matchers = event._matchers;
+			for (i = 0, l = fns.length; i < l; i++) this.removeEvent(type, matchers[i], fns[i]);
+			return this;
+		}
 
-// Fire the element on a certain target
-var fire = function(type, event, target){
-	var _event = events[type];
-	if (_event){
-		var domevent = new DOMEvent();
+		if (!fn){
+			fn = matcher;
+			matcher = true;
+		}
+
+		var i = _event ? indexOf(_event, matcher, fn) : -1;
+		if (i != -1){
+
+			if (custom && custom.onRemove) custom.onRemove(this, fn);
+
+			_event.matchers.splice(i, 1);
+			_event._matchers.splice(i, 1);
+			_event.fns.splice(i, 1);
+		}
+		if (__DEV__){
+			if (i == -1) throw new Error('The event was not registered before');
+		}
+		if (!_event.fns.length){
+			this.removeEventListener(type, _event.listener, !!(custom && custom.capture));
+			delete events[type];
+		}
+		return this;
+	},
+
+	fireEvent: function(type, domevent){
 		// maybe: if (!event) event = document.createEvent(...); stuff?
-		if (event) for (var p in event) domevent[p] = event[p];
-		domevent.target = Node.select(target || root);
-		var fns = _event.fns, matchers = _event.matchers;
-		for (var i = 0; i < fns.length; i++) bubble(fns[i], matchers[i], domevent);
+		if (!(domevent instanceof DOMEvent)) domevent = new DOMEvent(domevent);
+		var _target = domevent.target = (domevent.target || this),
+			path = [];
+		for (var node = _target.valueOf(); node; node = node.parentNode){
+			// all elements between _target -> <html>
+			var _node = select(node);
+			path.push(_node);
+			var events = _node.retrieve('_events'), _event = events && events[type];
+			if (_event){
+				var fns = _event.fns, matchers = _event.matchers;
+				for (var i = 0; i < fns.length; i++){
+					// all listeners added to this element
+					var fn = fns[i], matcher = matchers[i];
+					if (matcher === true) fn.call(_node, domevent); // traditional event
+					else for (var ii = 0, ll = path.length; ii < ll; ii++){
+						// delegation: match elements between: _target -> _node
+						if (matcher(path[ii], domevent)) fn.call(path[ii], domevent, _node);
+					}
+				}
+			}
+			if (node == html) break;
+		}
+		return this;
 	}
-	return this;
-};
+
+});
 
 var Events = {
-	addEvent: add,
-	removeEvent: remove,
-	fireEvent: fire
+
+	addEvent: function(type, matcher, fn){
+		return _html.addEvent(type, matcher, fn);
+	},
+
+	removeEvent: function(type, matcher, fn){
+		return _html.removeEvent(type, matcher, fn);
+	},
+
+	fireEvent: function(type, event){
+		return _html.fireEvent(type, event);
+	}
+
 };
 
 // Custom Events and Fixes
 
-var Custom = Accessor('Custom');
+var Custom = Accessor();
 for (var p in Custom) Events[p] = Custom[p];
 
 if (!hasMousewheel){
 	// better check that DOMMouseScroll exists
-	Events.defineCustom('mousewheel', {base: 'DOMMouseScroll'});
+	Events.define('mousewheel', {base: 'DOMMouseScroll'});
 }
 
 // mouseenter and mouseleave
 // with delegation we always have to check and cannot use the IE mouseenter/mouseleave
-var doc = Node.select(document); // no easy way to get the Node.Document isntance yet
+var doc = select(document); // no easy way to get the Node.Document isntance yet
 var check = function(element, event){ // cpojer has a better way?
 	var related = event.relatedTarget;
 	if (related == null) return true;
@@ -246,12 +267,15 @@ var check = function(element, event){ // cpojer has a better way?
 	return (related != element && related.get('prefix') != 'xul' && element != doc && !element.contains(related));
 };
 
-Events.defineCustom('mouseenter', {
-	base: 'mouseover',
-	condition: check
-}).defineCustom('mouseleave', {
-	base: 'mouseout',
-	condition: check
+Events.defines({
+	mouseenter: {
+		base: 'mouseover',
+		condition: check
+	},
+	mouseleave: {
+		base: 'mouseout',
+		condition: check
+	}
 });
 
 if (!hasEventListener){
@@ -260,12 +284,12 @@ if (!hasEventListener){
 	var _listenerstore = '_listenerstore';
 	var customFormEvents = function(name){
 		var focusin = function(event){
-			var target = Node.select(new DOMEvent(event).target);
+			var target = select(new DOMEvent(event).target);
 			if (name == 'submit' || name == 'reset') target = target.getParent('form');
 			var listener = target && target.retrieve(_listenerstore);
 			if (!listener && target){
 				listener = function(event){
-					fire(name, new DOMEvent(event), target);
+					select(target).fireEvent(name, event);
 				};
 				addEventListener(target.valueOf(), name, listener);
 				target.store(_listenerstore, listener);
@@ -274,26 +298,30 @@ if (!hasEventListener){
 		var events = 0;
 		return {
 			onAdd: function(){
-				if (++events == 1) addEventListener(root, 'focusin', focusin);
+				if (++events == 1) addEventListener(html, 'focusin', focusin);
 			},
 			onRemove: function(){
-				if (--events == 0) removeEventListener(root, 'focusin', focusin);
+				if (--events == 0) removeEventListener(html, 'focusin', focusin);
 			}
 		}
 	};
 
+	// todo: implement the onchange fix by csuwldcat
 	var fixBubblingEvents = ['submit', 'reset', 'change', 'select'];
-	for (var l = fixBubblingEvents.length; l--;) Events.defineCustom(fixBubblingEvents[l], customFormEvents(fixBubblingEvents[l]));
+	for (var l = fixBubblingEvents.length; l--;) Events.define(fixBubblingEvents[l], customFormEvents(fixBubblingEvents[l]));
 
 }
 
 // Focus / blur delegation
-Events.defineCustom('focus', {
-	base: 'focus' + (hasEventListener ? '' : 'in'),
-	capture: true
-}).defineCustom('blur', {
-	base: hasEventListener ? 'blur' : 'focusout',
-	capture: true
+Events.defines({
+	focus: {
+		base: 'focus' + (hasEventListener ? '' : 'in'),
+		capture: true
+	},
+	blur: {
+		base: hasEventListener ? 'blur' : 'focusout',
+		capture: true
+	}
 });
 
 return Events;
