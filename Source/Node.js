@@ -8,8 +8,6 @@ define([
 
 // node
 
-var html = document.documentElement;
-
 var Node = Class({
 
 	Implements: Store,
@@ -26,23 +24,7 @@ var Node = Class({
 		var elements = new Elements, nodes = Slick.search(this.node, expression);
 		for (var i = 0; i < nodes.length; i++) elements[elements.length++] = select(nodes[i]);
 		return elements;
-	},
-
-	addEventListener: ((html.addEventListener) ? function(type, fn){
-		this.node.addEventListener(type, fn, false);
-		return this;
-	} : function(type, fn){
-		this.node.attachEvent('on' + type, fn);
-		return this;
-	}),
-
-	removeEventListener: ((html.removeEventListener) ? function(type, fn){
-		this.node.removeEventListener(type, fn, false);
-		return this;
-	} : function(type, fn){
-		this.node.detachEvent('on' + type, fn);
-		return this;
-	})
+	}
 
 });
 
