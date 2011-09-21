@@ -145,7 +145,7 @@ Node.implement({
 				return _matcher.contains(element);
 			};
 		} else if (typeOf(matcher) == 'element'){
-			var _element = Node.select(matcher);
+			var _element = select(matcher);
 			matcher = function(element){
 				return element == _element;
 			};
