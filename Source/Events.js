@@ -188,6 +188,7 @@ Node.implement({
 
 			_event.matchers.splice(i, 1);
 			_event._matchers.splice(i, 1);
+			_event.conditions.splice(i, 1);
 			_event.fns.splice(i, 1);
 		}
 		if (has('dev')){
