@@ -96,7 +96,7 @@ Node.implement({
 			if (index != -1) return this;
 		} else {
 			// first time for this type of event: so add a listener
-			_event = events[type] = {matchers: [], _matchers: [], fns: []};
+			_event = events[type] = {matchers: [], _matchers: [], conditions: [], fns: []};
 			var _self = this;
 			var listener = _event.listener = function(event){
 				_self.fireEvent(type, event);
@@ -147,17 +147,11 @@ Node.implement({
 			};
 		}
 
-		if (custom && custom.condition){
-			var __matcher = matcher;
-			matcher = function(element, event){
-				return __matcher(element) && custom.condition(element, event);
-			}
-		}
-
 		if (custom && custom.onAdd) custom.onAdd(this, fn);
 
 		_event.matchers.push(matcher);
 		_event._matchers.push(_matcher)
+		_event.conditions.push(custom && custom.condition);
 		_event.fns.push(fn);
 
 		return this;
@@ -206,26 +200,32 @@ Node.implement({
 		// maybe: if (!event) event = document.createEvent(...); stuff?
 		if (!(domevent instanceof DOMEvent)) domevent = new DOMEvent(domevent);
 		var _target = domevent.target = (domevent.target || this),
-			path = [];
-		for (var node = _target.valueOf(); node; node = node.parentNode){
-			// all elements between _target -> <html>
-			var _node = select(node);
-			path.push(_node);
-			var events = _node.retrieve('_events'), _event = events && events[type];
-			if (_event){
-				var fns = _event.fns, matchers = _event.matchers;
-				for (var i = 0; i < fns.length; i++){
-					// all listeners added to this element
-					var fn = fns[i], matcher = matchers[i];
-					if (matcher === true) fn.call(_node, domevent); // traditional event
-					else for (var ii = 0, ll = path.length; ii < ll; ii++){
-						// delegation: match elements between: _target -> _node
-						if (matcher(path[ii], domevent)) fn.call(path[ii], domevent, _node);
+			events = this.retrieve('_events'), _event = events && events[type],
+			path;
+
+		if (_event) for (var i = 0, l = _event.fns.length; i < l; i++){
+			// all listeners added to this element
+			var fn = _event.fns[i], matcher = _event.matchers[i], condition = _event.conditions[i];
+			if (matcher === true){
+				if (!condition || condition(this, domevent)) fn.call(this, domevent); // traditional event
+			} else {
+				if (!path){
+					path = [];
+					for (var node = _target.valueOf(); node; node = node.parentNode){
+						var _node = select(node);
+						path.push(_node);
+						if (_node == this || _node == _html) break;
+					}
+				}
+				for (var ii = 0, ll = path.length; ii < ll; ii++){
+					// delegation: match elements between: _target -> _node
+					if (matcher(path[ii], domevent) && (!condition || condition(path[ii], domevent))){
+						fn.call(path[ii], domevent, this);
 					}
 				}
 			}
-			if (node == html) break;
 		}
+
 		return this;
 	}
 
