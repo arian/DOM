@@ -10,7 +10,10 @@ define([
 // we need to find a way for this.
 // need to find a definite format for this, maybe has('dev')
 // http://requirejs.org/docs/optimization.html#hasjs
-var __DEV__ = true;
+var has = function(feature){
+	if (feature == 'dev') return true;
+	return false;
+};
 
 // Not rely directly on Slick?
 var _match = Slick.match,
@@ -71,6 +74,7 @@ Node.implement({
 				fns: [],		// the passed function
 				matchers: [],	// the matcher function
 				_matchers: [],	// the passed matcher (fn, element, node)
+				conditions: [], // conditions for firing the event
 				listener: fn	// the one passed into addEventListener
 			}],
 			submit: [...]
@@ -83,7 +87,7 @@ Node.implement({
 			matcher = true;
 		}
 
-		if (__DEV__){
+		if (has('dev')){
 			if (typeof fn != 'function') throw new Error('The function argument must be a function');
 		}
 
@@ -186,7 +190,7 @@ Node.implement({
 			_event._matchers.splice(i, 1);
 			_event.fns.splice(i, 1);
 		}
-		if (__DEV__){
+		if (has('dev')){
 			if (i == -1) throw new Error('The event was not registered before');
 		}
 		if (!_event.fns.length){
@@ -207,8 +211,10 @@ Node.implement({
 			// all listeners added to this element
 			var fn = _event.fns[i], matcher = _event.matchers[i], condition = _event.conditions[i];
 			if (matcher === true){
-				if (!condition || condition(this, domevent)) fn.call(this, domevent); // traditional event
+				// traditional event
+				if (!condition || condition(this, domevent)) fn.call(this, domevent);
 			} else {
+				// delegation: match elements between: _target -> _node
 				if (!path){
 					path = [];
 					for (var node = _target.valueOf(); node; node = node.parentNode){
@@ -218,14 +224,12 @@ Node.implement({
 					}
 				}
 				for (var ii = 0, ll = path.length; ii < ll; ii++){
-					// delegation: match elements between: _target -> _node
 					if (matcher(path[ii], domevent) && (!condition || condition(path[ii], domevent))){
 						fn.call(path[ii], domevent, this);
 					}
 				}
 			}
 		}
-
 		return this;
 	}
 
