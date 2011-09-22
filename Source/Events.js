@@ -7,10 +7,7 @@ define([
 	'Slick/Finder'
 ], function(Accessor, typeOf, Node, DOMEvent, Slick){
 
-// Not rely directly on Slick?
-var _match = Slick.match,
-
-	select = Node.select,
+var select = Node.select,
 	html = document.documentElement, // real DOM elements
 	_html = select(html), // wrapped element, prefixed with a _
 
@@ -41,82 +38,92 @@ var _match = Slick.match,
 		node.detachEvent('on' + type, fn);
 	},
 
-	simpleSelectorMatch = /^(\.|#)?(\w+)$/i;
+	// Mediator mediates Listeners for one Element and Event type.
+	Mediator = function(element, type){
+		var listeners = [],
+			custom = Events.lookup(type),
+			condition = custom && custom.condition;
+			capture = custom && custom.capture,
+			mediator = this;
 
-Node.implement({
+		this.length = 0;
+		this.custom = custom;
+		this.element = element;
 
-	addEventListener: function(type, fn, useCapture){
-		addEventListener(this.node, type, fn, useCapture);
-		return this;
+		var fire = this.fire = function(event, index){
+			// maybe: if (!event) event = document.createEvent(...); stuff?
+			if (!(event instanceof DOMEvent)) event = new DOMEvent(event);
+			var _target = event.target = (event.target || element),
+				path, i = 0, l = listeners.length;
+			// index, if only one listener should be fired.
+			if (index != null){
+				i = index;
+				l = i + 1;
+			}
+			// a fix when the listeners was removed within the called function
+			// this defers the removal after the firing of events
+			var remove = mediator.remove, removed = [];
+			mediator.remove = function(index){
+				removed.push(index);
+			};
+			for (; i < l; i++){
+				// all listeners added to this element
+				var fn = listeners[i].fn, matcher = listeners[i].matcher;
+				if (matcher === true){
+					// traditional event
+					if (!condition || condition(element, event)) fn.call(element, event);
+				} else {
+					// delegation: match elements between: _target -> element
+					if (!path){
+						path = [];
+						for (var node = _target.valueOf(); node; node = node.parentNode){
+							var _node = select(node);
+							path.push(_node);
+							if (_node == element || _node == _html) break;
+						}
+					}
+					for (var ii = 0, ll = path.length; ii < ll; ii++){
+						if (matcher(path[ii], event) && (!condition || condition(path[ii], event))){
+							fn.call(path[ii], event, element);
+						}
+					}
+				}
+			}
+			for (var j = removed.length; j--;) remove.call(mediator, removed[j]);
+			mediator.remove = remove;
+		};
+
+		if (custom && custom.base) type = custom.base
+
+		this.add = function(listener){
+			listeners.push(listener);
+			if (this.length == 0) element.addEventListener(type, fire, capture);
+			return ++this.length;
+		};
+
+		this.remove = function(index){
+			listeners = listeners.splice(index, 1);
+			if (!this.length--) element.removeEventListener(type, fire, capture);
+		};
 	},
 
-	removeEventListener: function(type, fn, useCapture){
-		removeEventListener(this.node, type, fn, useCapture);
-		return this;
+	mediatorsOf = function(element){
+		return element.retrieve('_mediators', {});
 	},
 
-	addEvent: function(type, matcher, fn){
-		/* {
-			click: [{
-				fns: [],		// the passed function
-				matchers: [],	// the matcher function
-				conditions: [], // conditions for firing the event
-				fire: fn		// the one passed into addEventListener wich fires the events
-			}, {...}],
-			submit: [...]
-		} */
-		var events = this.retrieve('_events', {}),
-			_event = events[type],
-			_self = this;
+	simpleSelectorMatch = /^(\.|#)?(\w+)$/i,
+	// Should rely on API, not implementation (Slick)
+	_match = Slick.match,
 
+	Listener = function(mediator, matcher, fn){
 		if (!fn){
 			fn = matcher;
 			matcher = true;
 		}
-
 		if (has('dev')){
 			if (typeof fn != 'function') throw new Error('The function argument must be a function');
 		}
-
-		var custom = Events.lookup(type);
-		if (custom && custom.base) type = custom.base;
-
-		if (!_event){
-			// first time for this type of event: so add a listener
-			_event = events[type] = {matchers: [], conditions: [], fns: [], removes: []};
-			var fire = _event.fire = function(event){
-				// maybe: if (!event) event = document.createEvent(...); stuff?
-				if (!(event instanceof DOMEvent)) event = new DOMEvent(event);
-				var _target = event.target = (event.target || _self), path;
-
-				for (var i = 0, l = _event.fns.length; i < l; i++){
-					// all listeners added to this element
-					var fn = _event.fns[i], matcher = _event.matchers[i], condition = _event.conditions[i];
-					if (matcher === true){
-						// traditional event
-						if (!condition || condition(_self, event)) fn.call(_self, event);
-					} else {
-						// delegation: match elements between: _target -> _node
-						if (!path){
-							path = [];
-							for (var node = _target.valueOf(); node; node = node.parentNode){
-								var _node = select(node);
-								path.push(_node);
-								if (_node == _self || _node == _html) break;
-							}
-						}
-						for (var ii = 0, ll = path.length; ii < ll; ii++){
-							if (matcher(path[ii], event) && (!condition || condition(path[ii], event))){
-								fn.call(path[ii], event, _self);
-							}
-						}
-					}
-				}
-				return this;
-			};
-			this.addEventListener(type, fire, custom && custom.capture);
-		}
-
+		// normalize matcher
 		// supported matchers: selector string, (wrapped) node or (native) element
 		var _matcher = matcher;
 		if (typeof matcher == 'string'){
@@ -160,46 +167,97 @@ Node.implement({
 			};
 		}
 
-		if (custom && custom.onAdd) custom.onAdd(this, fn);
+		this.mediator = mediator;
+		this.matcher = matcher;
+		this.fn = fn;
 
-		var index = _event.matchers.push(matcher) - 1;
-		_event.conditions.push(custom && custom.condition);
-		_event.fns.push(fn);
+		var custom = mediator.custom,
+			element = mediator.element,
+			index;
 
-		var remove = function(){
-			if (custom && custom.onRemove) custom.onRemove(_self, fn);
-
-			_event.matchers.splice(index, 1);
-			_event.conditions.splice(index, 1);
-			_event.fns.splice(index, 1);
-
-			if (!_event.fns.length){
-				_self.removeEventListener(type, _event.fire, custom && custom.capture);
-				delete events[type];
+		this.add = function(){
+			if (index != null){
+				if (has('dev')) throw new Error('The listeners is already listening');
+				return this;
 			}
-
+			index = mediator.add(this);
+			if (custom && custom.onAdd) custom.onAdd(this);
 			return this;
 		};
 
-		_event.removes.push(remove);
-
-		return {
-			remove: remove,
-			fire: _event.fire
+		this.remove = function(){
+			if (index == null){
+				if (has('dev')) throw new Error('The listener is not listening yet');
+				return this;
+			}
+			mediator.remove(index);
+			index = null;
+			if (custom && custom.onRemove) custom.onRemove(this);
+			return this;
 		};
+
+		this.fire = function(event){
+			if (index != null) mediator.fire(event, index);
+			return this;
+		};
+	};
+
+// Examples what you could do with listeners and why it's cool
+Listener.prototype.once = function(){
+	var fn = this.fn, listener = this;
+	this.fn = function(){
+		listener.remove();
+		fn.apply(this, arguments);
+	};
+	return this.add();
+};
+
+Listener.prototype.throttle = function(value){
+	var fn = this.fn, throttled;
+	if (!value) value = 250;
+	this.fn = function(){
+		if (!throttled){
+			fn.apply(this, arguments);
+			throttled = setTimeout(function(){
+				throttled = null;
+			}, value);
+		}
+	};
+	return this;
+};
+
+Node.implement({
+
+	addEventListener: function(type, fn, useCapture){
+		addEventListener(this.node, type, fn, useCapture);
+		return this;
 	},
 
-	removeEvent: function(type){
-		var events = this.retrieve('_events'), _event = events && events[type];
-		if (_event) for (var l = _event.removes.length; l--;){
-			_event.removes[l]();
-		}
+	removeEventListener: function(type, fn, useCapture){
+		removeEventListener(this.node, type, fn, useCapture);
+		return this;
+	},
+
+	createListener: function(type, matcher, fn){
+		var mediators = mediatorsOf(this), mediator = mediators[type];
+		if (!mediator) mediator = mediators[type] = new Mediator(this, type);
+		return new Listener(mediator, matcher, fn);
+	},
+
+	addListener: function(type, matcher, fn){
+		return this.createListener(type, matcher, fn).add();
+	},
+
+	// probably shouldn't really be used I think
+	removeListeners: function(type){
+		var mediator = mediatorsOf(this)[type];
+		if (mediator) for (var i = 0; i < mediator.length; i++) mediator.remove(i);
 		return this;
 	},
 
 	fireEvent: function(type, event){
-		var events = this.retrieve('_events'), _event = events && events[type];
-		if (_event) _event.fire(event);
+		var mediator = mediatorsOf(this)[type];
+		if (mediator) mediator.fire(event);
 		return this;
 	}
 
@@ -207,13 +265,24 @@ Node.implement({
 
 var Events = {
 
-	addEvent: function(type, matcher, fn){
-		return _html.addEvent(type, matcher, fn);
+	create: function(type, matcher, fn){
+		return _html.createListener(type, matcher, fn);
 	},
 
-	fireEvent: function(type, event){
+	add: function(type, matcher, fn){
+		return this.create(type, matcher, fn).add();
+	},
+
+	once: function(type, matcher, fn){
+		return this.create(type, matcher, fn).once();
+	},
+
+	fire: function(type, event){
 		return _html.fireEvent(type, event);
-	}
+	},
+
+	// make public, might be useful to add some methods 'n jazz
+	Listener: Listener
 
 };
 
@@ -265,13 +334,13 @@ if (!has('eventlistener')){
 				target.store(_listenerstore, listener);
 			}
 		};
-		var events = 0;
+		var listeners = 0;
 		return {
 			onAdd: function(){
-				if (++events == 1) addEventListener(html, 'focusin', focusin);
+				if (++listeners == 1) addEventListener(html, 'focusin', focusin);
 			},
 			onRemove: function(){
-				if (--events == 0) removeEventListener(html, 'focusin', focusin);
+				if (--listeners == 0) removeEventListener(html, 'focusin', focusin);
 			}
 		}
 	};
