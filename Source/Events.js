@@ -84,17 +84,17 @@ Node.implement({
 		if (!_event){
 			// first time for this type of event: so add a listener
 			_event = events[type] = {matchers: [], conditions: [], fns: [], removes: []};
-			var fire = _event.fire = function(domevent){
+			var fire = _event.fire = function(event){
 				// maybe: if (!event) event = document.createEvent(...); stuff?
-				if (!(domevent instanceof DOMEvent)) domevent = new DOMEvent(domevent);
-				var _target = domevent.target = (domevent.target || _self), path;
+				if (!(event instanceof DOMEvent)) event = new DOMEvent(event);
+				var _target = event.target = (event.target || _self), path;
 
 				for (var i = 0, l = _event.fns.length; i < l; i++){
 					// all listeners added to this element
 					var fn = _event.fns[i], matcher = _event.matchers[i], condition = _event.conditions[i];
 					if (matcher === true){
 						// traditional event
-						if (!condition || condition(_self, domevent)) fn.call(_self, domevent);
+						if (!condition || condition(_self, event)) fn.call(_self, event);
 					} else {
 						// delegation: match elements between: _target -> _node
 						if (!path){
@@ -106,8 +106,8 @@ Node.implement({
 							}
 						}
 						for (var ii = 0, ll = path.length; ii < ll; ii++){
-							if (matcher(path[ii], domevent) && (!condition || condition(path[ii], domevent))){
-								fn.call(path[ii], domevent, _self);
+							if (matcher(path[ii], event) && (!condition || condition(path[ii], event))){
+								fn.call(path[ii], event, _self);
 							}
 						}
 					}
@@ -191,16 +191,15 @@ Node.implement({
 
 	removeEvent: function(type){
 		var events = this.retrieve('_events'), _event = events && events[type];
-		if (_event){
-			var removes = _event.removes;
-			for (var l = removes; l--;) removes[l]();
+		if (_event) for (var l = _event.removes.length; l--;){
+			_event.removes[l]();
 		}
 		return this;
 	},
 
-	fireEvent: function(type, domevent){
+	fireEvent: function(type, event){
 		var events = this.retrieve('_events'), _event = events && events[type];
-		if (_event) _event.fire(domevent);
+		if (_event) _event.fire(event);
 		return this;
 	}
 
@@ -210,10 +209,6 @@ var Events = {
 
 	addEvent: function(type, matcher, fn){
 		return _html.addEvent(type, matcher, fn);
-	},
-
-	removeEvent: function(type){
-		return _html.removeEvent(type, matcher, fn);
 	},
 
 	fireEvent: function(type, event){
