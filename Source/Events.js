@@ -7,14 +7,6 @@ define([
 	'Slick/Finder'
 ], function(Accessor, typeOf, Node, DOMEvent, Slick){
 
-// we need to find a way for this.
-// need to find a definite format for this, maybe has('dev')
-// http://requirejs.org/docs/optimization.html#hasjs
-var has = function(feature){
-	if (feature == 'dev') return true;
-	return false;
-};
-
 // Not rely directly on Slick?
 var _match = Slick.match,
 
@@ -22,36 +14,31 @@ var _match = Slick.match,
 	html = document.documentElement, // real DOM elements
 	_html = select(html), // wrapped element, prefixed with a _
 
-	// feature detections
 	hasEventListener = !!html.addEventListener,
 	hasMousewheel = 'onmousewheel' in html,
 
-	addEventListener = hasEventListener ? function(node, type, fn, useCapture){
+	// we need to find a way for this.
+	// need to find a definite format for this, maybe has('dev')
+	// http://requirejs.org/docs/optimization.html#hasjs
+	has = function(feature){
+		switch (feature){
+			case 'dev': return true;
+			case 'eventlistener': return hasEventListener;
+			case 'mousewheel': return hasMousewheel;
+		}
+		return false;
+	},
+
+	addEventListener = has('eventlistener') ? function(node, type, fn, useCapture){
 		node.addEventListener(type, fn, !!useCapture);
 	} : function(node, type, fn){
 		node.attachEvent('on' + type, fn);
 	},
 
-	removeEventListener = hasEventListener ? function(node, type, fn, useCapture){
-		node.removeEventListener(type, fn, useCapture);
+	removeEventListener = has('eventlistener') ? function(node, type, fn, useCapture){
+		node.removeEventListener(type, fn, !!useCapture);
 	} : function(node, type, fn){
 		node.detachEvent('on' + type, fn);
-	},
-
-	// find the matcher and/or function, O(n)?
-	// we wouldn't need this if addEvent would return an object: {fire: fn, remove: fn}
-	// then we don't have to add this indexOf() check in addEvent to prevent duplicates
-	indexOf = function(event, matcher, fn){
-		var fns = event.fns, matchers = event._matchers,
-			i = 0, l = fns.length;
-		if (matcher && fn) for (; i < l; i++){
-			if (fn == fns[i] && matcher == matchers[i]) return i;
-		} else if (matcher) for (; i < l; i++){
-			if (matcher == matchers[i]) return i;
-		} else if (fn) for (; i < l; i++){
-			if (fn == fns[i]) return i;
-		}
-		return -1;
 	},
 
 	simpleSelectorMatch = /^(\.|#)?(\w+)$/i;
@@ -73,14 +60,14 @@ Node.implement({
 			click: [{
 				fns: [],		// the passed function
 				matchers: [],	// the matcher function
-				_matchers: [],	// the passed matcher (fn, element, node)
 				conditions: [], // conditions for firing the event
-				listener: fn	// the one passed into addEventListener
-			}],
+				fire: fn		// the one passed into addEventListener wich fires the events
+			}, {...}],
 			submit: [...]
 		} */
 		var events = this.retrieve('_events', {}),
-			_event = events[type];
+			_event = events[type],
+			_self = this;
 
 		if (!fn){
 			fn = matcher;
@@ -94,18 +81,40 @@ Node.implement({
 		var custom = Events.lookup(type);
 		if (custom && custom.base) type = custom.base;
 
-		if (_event){
-			// prevent functions to be added twice
-			var index = indexOf(_event, matcher, fn);
-			if (index != -1) return this;
-		} else {
+		if (!_event){
 			// first time for this type of event: so add a listener
-			_event = events[type] = {matchers: [], _matchers: [], conditions: [], fns: []};
-			var _self = this;
-			var listener = _event.listener = function(event){
-				_self.fireEvent(type, event);
+			_event = events[type] = {matchers: [], conditions: [], fns: [], removes: []};
+			var fire = _event.fire = function(domevent){
+				// maybe: if (!event) event = document.createEvent(...); stuff?
+				if (!(domevent instanceof DOMEvent)) domevent = new DOMEvent(domevent);
+				var _target = domevent.target = (domevent.target || _self), path;
+
+				for (var i = 0, l = _event.fns.length; i < l; i++){
+					// all listeners added to this element
+					var fn = _event.fns[i], matcher = _event.matchers[i], condition = _event.conditions[i];
+					if (matcher === true){
+						// traditional event
+						if (!condition || condition(_self, domevent)) fn.call(_self, domevent);
+					} else {
+						// delegation: match elements between: _target -> _node
+						if (!path){
+							path = [];
+							for (var node = _target.valueOf(); node; node = node.parentNode){
+								var _node = select(node);
+								path.push(_node);
+								if (_node == _self || _node == _html) break;
+							}
+						}
+						for (var ii = 0, ll = path.length; ii < ll; ii++){
+							if (matcher(path[ii], domevent) && (!condition || condition(path[ii], domevent))){
+								fn.call(path[ii], domevent, _self);
+							}
+						}
+					}
+				}
+				return this;
 			};
-			this.addEventListener(type, listener, !!(custom && custom.capture));
+			this.addEventListener(type, fire, custom && custom.capture);
 		}
 
 		// supported matchers: selector string, (wrapped) node or (native) element
@@ -153,84 +162,45 @@ Node.implement({
 
 		if (custom && custom.onAdd) custom.onAdd(this, fn);
 
-		_event.matchers.push(matcher);
-		_event._matchers.push(_matcher)
+		var index = _event.matchers.push(matcher) - 1;
 		_event.conditions.push(custom && custom.condition);
 		_event.fns.push(fn);
 
-		return this;
+		var remove = function(){
+			if (custom && custom.onRemove) custom.onRemove(_self, fn);
+
+			_event.matchers.splice(index, 1);
+			_event.conditions.splice(index, 1);
+			_event.fns.splice(index, 1);
+
+			if (!_event.fns.length){
+				_self.removeEventListener(type, _event.fire, custom && custom.capture);
+				delete events[type];
+			}
+
+			return this;
+		};
+
+		_event.removes.push(remove);
+
+		return {
+			remove: remove,
+			fire: _event.fire
+		};
 	},
 
-	removeEvent: function(type, matcher, fn){
-		var events = this.retrieve('_events');
-		if (!events) return this;
-
-		var custom = Events.lookup(type);
-		if (custom && custom.base) type = custom.base;
-
-		var _event = events[type];
-
-		if (!matcher && !fn){
-			var fns = event.fns, matchers = event._matchers;
-			for (i = 0, l = fns.length; i < l; i++) this.removeEvent(type, matchers[i], fns[i]);
-			return this;
-		}
-
-		if (!fn){
-			fn = matcher;
-			matcher = true;
-		}
-
-		var i = _event ? indexOf(_event, matcher, fn) : -1;
-		if (i != -1){
-
-			if (custom && custom.onRemove) custom.onRemove(this, fn);
-
-			_event.matchers.splice(i, 1);
-			_event._matchers.splice(i, 1);
-			_event.conditions.splice(i, 1);
-			_event.fns.splice(i, 1);
-		}
-		if (has('dev')){
-			if (i == -1) throw new Error('The event was not registered before');
-		}
-		if (!_event.fns.length){
-			this.removeEventListener(type, _event.listener, !!(custom && custom.capture));
-			delete events[type];
+	removeEvent: function(type){
+		var events = this.retrieve('_events'), _event = events && events[type];
+		if (_event){
+			var removes = _event.removes;
+			for (var l = removes; l--;) removes[l]();
 		}
 		return this;
 	},
 
 	fireEvent: function(type, domevent){
-		// maybe: if (!event) event = document.createEvent(...); stuff?
-		if (!(domevent instanceof DOMEvent)) domevent = new DOMEvent(domevent);
-		var _target = domevent.target = (domevent.target || this),
-			events = this.retrieve('_events'), _event = events && events[type],
-			path;
-
-		if (_event) for (var i = 0, l = _event.fns.length; i < l; i++){
-			// all listeners added to this element
-			var fn = _event.fns[i], matcher = _event.matchers[i], condition = _event.conditions[i];
-			if (matcher === true){
-				// traditional event
-				if (!condition || condition(this, domevent)) fn.call(this, domevent);
-			} else {
-				// delegation: match elements between: _target -> _node
-				if (!path){
-					path = [];
-					for (var node = _target.valueOf(); node; node = node.parentNode){
-						var _node = select(node);
-						path.push(_node);
-						if (_node == this || _node == _html) break;
-					}
-				}
-				for (var ii = 0, ll = path.length; ii < ll; ii++){
-					if (matcher(path[ii], domevent) && (!condition || condition(path[ii], domevent))){
-						fn.call(path[ii], domevent, this);
-					}
-				}
-			}
-		}
+		var events = this.retrieve('_events'), _event = events && events[type];
+		if (_event) _event.fire(domevent);
 		return this;
 	}
 
@@ -242,7 +212,7 @@ var Events = {
 		return _html.addEvent(type, matcher, fn);
 	},
 
-	removeEvent: function(type, matcher, fn){
+	removeEvent: function(type){
 		return _html.removeEvent(type, matcher, fn);
 	},
 
@@ -257,7 +227,7 @@ var Events = {
 var Custom = Accessor();
 for (var p in Custom) Events[p] = Custom[p];
 
-if (!hasMousewheel){
+if (!has('mousewheel')){
 	// better check that DOMMouseScroll exists
 	Events.define('mousewheel', {base: 'DOMMouseScroll'});
 }
@@ -283,7 +253,7 @@ Events.defines({
 	}
 });
 
-if (!hasEventListener){
+if (!has('eventlistener')){
 
 	// Submit, reset, change and select delegation
 	var _listenerstore = '_listenerstore';
@@ -320,11 +290,11 @@ if (!hasEventListener){
 // Focus / blur delegation
 Events.defines({
 	focus: {
-		base: 'focus' + (hasEventListener ? '' : 'in'),
+		base: 'focus' + (has('eventlistener') ? '' : 'in'),
 		capture: true
 	},
 	blur: {
-		base: hasEventListener ? 'blur' : 'focusout',
+		base: has('eventlistener') ? 'blur' : 'focusout',
 		capture: true
 	}
 });
