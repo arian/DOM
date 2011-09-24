@@ -7,9 +7,8 @@ define([
 	'Slick/Finder'
 ], function(Accessor, typeOf, Node, DOMEvent, Slick){
 
-var select = Node.select,
-	html = document.documentElement, // real DOM elements
-	_html = select(html), // wrapped element, prefixed with a _
+var html = document.documentElement, // real DOM elements
+	_html = Node.select(html), // wrapped element, prefixed with a _
 
 	hasEventListener = !!html.addEventListener,
 	hasMousewheel = 'onmousewheel' in html,
@@ -77,7 +76,7 @@ var select = Node.select,
 					if (!path){
 						path = [];
 						for (var node = _target.valueOf(); node; node = node.parentNode){
-							var _node = select(node);
+							var _node = Node.select(node);
 							path.push(_node);
 							if (_node == element || _node == _html) break;
 						}
@@ -115,6 +114,61 @@ var select = Node.select,
 	// Should rely on API, not implementation (Slick)
 	_match = Slick.match,
 
+	// supported matchers: selector string, (wrapped) node or (native) element
+	normalizeMatcher = function(matcher){
+		var type = typeof matcher;
+		if (type == 'function' || type == 'boolean'){
+			return matcher;
+		}
+		if (type == 'string'){
+			// Some matcher optimalization for simple selectors (tagname, class, id)
+			var selectorMatch = matcher.match(simpleSelectorMatch);
+			if (selectorMatch){
+				if (!selectorMatch[1]){
+					var tag = selectorMatch[2].toLowerCase();
+					return function(element){
+						return element.get('tag') == tag;
+					};
+				}
+				if (selectorMatch[1] == '.'){
+					var className = selectorMatch[2];
+					return function(element){
+						return element.hasClass(className);
+					};
+				}
+				if (selectorMatch[1] == '#'){
+					var id = selectorMatch[2];
+					return function(element){
+						return element.get('id') == id;
+					};
+				}
+			}
+			// more complex selectors
+			return function(element){
+				_match(element, matcher);
+			};
+		}
+		if (matcher instanceof Node){
+			return function(element){
+				return element == matcher;
+			};
+		}
+		if (matcher instanceof Node.Elements){
+			return function(element){
+				return matcher.contains(element);
+			};
+		}
+		if (typeOf(matcher) == 'element'){
+			var _element = Node.select(matcher);
+			return function(element){
+				return element == _element;
+			};
+		}
+		if (has('dev')){
+			throw new Error('The given matcher is not valid. It should be a function, element or CSS selector');
+		}
+	},
+
 	Listener = function(mediator, matcher, fn){
 		if (!fn){
 			fn = matcher;
@@ -123,56 +177,13 @@ var select = Node.select,
 		if (has('dev')){
 			if (typeof fn != 'function') throw new Error('The function argument must be a function');
 		}
-		// normalize matcher
-		// supported matchers: selector string, (wrapped) node or (native) element
-		var _matcher = matcher;
-		if (typeof matcher == 'string'){
-			// Some matcher optimalization for simple selectors (tagname, class, id)
-			var selectorMatch = matcher.match(simpleSelectorMatch);
-			if (selectorMatch){
-				if (!selectorMatch[1]){
-					var tag = selectorMatch[2].toLowerCase();
-					matcher = function(element){
-						return element.get('tag') == tag;
-					};
-				} else if (selectorMatch[1] == '.'){
-					var className = selectorMatch[2];
-					matcher = function(element){
-						return element.hasClass(className);
-					};
-				} else if (selectorMatch[1] == '#'){
-					var id = selectorMatch[2];
-					matcher = function(element){
-						return element.get('id') == id;
-					};
-				}
-			} else {
-				// more complex selectors
-				matcher = function(element){
-					_match(element, _matcher);
-				};
-			}
-		} else if (matcher instanceof Node){
-			matcher = function(element){
-				return element == _matcher;
-			};
-		} else if (matcher instanceof Node.Elements){
-			matcher = function(element){
-				return _matcher.contains(element);
-			};
-		} else if (typeOf(matcher) == 'element'){
-			var _element = select(matcher);
-			matcher = function(element){
-				return element == _element;
-			};
-		}
+		matcher = normalizeMatcher(matcher);
 
 		this.mediator = mediator;
 		this.matcher = matcher;
 		this.fn = fn;
 
 		var custom = mediator.custom,
-			element = mediator.element,
 			index;
 
 		this.add = function(){
@@ -298,7 +309,7 @@ if (!has('mousewheel')){
 
 // mouseenter and mouseleave
 // with delegation we always have to check and cannot use the IE mouseenter/mouseleave
-var doc = select(document); // no easy way to get the Node.Document isntance yet
+var doc = Node.select(document); // no easy way to get the Node.Document isntance yet
 var check = function(element, event){ // cpojer has a better way?
 	var related = event.relatedTarget;
 	if (related == null) return true;
@@ -323,12 +334,12 @@ if (!has('eventlistener')){
 	var _listenerstore = '_listenerstore';
 	var customFormEvents = function(name){
 		var focusin = function(event){
-			var target = select(new DOMEvent(event).target);
+			var target = Node.select(new DOMEvent(event).target);
 			if (name == 'submit' || name == 'reset') target = target.getParent('form');
 			var listener = target && target.retrieve(_listenerstore);
 			if (!listener && target){
 				listener = function(event){
-					select(target).fireEvent(name, event);
+					Node.select(target).fireEvent(name, event);
 				};
 				addEventListener(target.valueOf(), name, listener);
 				target.store(_listenerstore, listener);
