@@ -1,5 +1,5 @@
 
-define(['./Node', 'Slick/Finder'], function(Node, Slick){
+define(['./Node', 'Slick/Finder', './specificity'], function(Node, Slick, specificity){
 
 var wrappers = {}, matchers = [];
 
@@ -17,10 +17,23 @@ var select = function(node){
 		if (node instanceof Node) return node;
 		var uid = node.uniqueNumber || Slick.uidOf(node), wrapper = wrappers[uid];
 		if (wrapper) return wrapper;
+		var matchedSelectors = [], matchedConstructors = {};
+		var matcher, type, match, construct;
 		for (var l = matchers.length; l--;){
-			var current = matchers[l],
-				matched = current.type == 'string' ? Slick.match(node, current.match) : current.match(node);
-			if (matched) return (wrappers[uid] = new current.construct(node));
+			matcher = matchers[l];
+			type = matcher.type;
+			match = matcher.match;
+			construct = matcher.construct;
+			var matched = type == 'string' ? Slick.match(node, match) : match(node);
+			if (matched){
+				if (type != 'string') return (wrappers[uid] = new construct(node));
+				matchedConstructors[match] = construct;
+				matchedSelectors.push(match);
+			}
+		}
+		if (matchedSelectors.length){
+			construct = matchedConstructors[specificity.max(matchedSelectors)];
+			if (construct) return (wrappers[uid] = new construct(node));
 		}
 	}
 	return null;
