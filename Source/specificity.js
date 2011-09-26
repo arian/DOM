@@ -5,22 +5,28 @@ return {
 
 	// http://www.w3.org/TR/CSS2/cascade.html#specificity
 	// http://www.w3.org/TR/css3-selectors/#specificity
-	// doesn't support :not() (yet)
 	specificity: function(selector){
 		var parsed = Slick.parse(selector);
 		var expressions = parsed.expressions;
 		var specificity = -1;
 		for (var j = 0; j < expressions.length; j++){
-			var b = 0, c = 0, d = 0, s = 0;
+			var b = 0, c = 0, d = 0, s = 0, nots = [];
 			for (var i = 0; i < expressions[j].length; i++){
-				var expression = expressions[j][i];
+				var expression = expressions[j][i], pseudos = expression.pseudos;
 				if (expression.id) b++;
 				if (expression.attributes) c += expression.attributes.length;
 				if (expression.classes) c += expression.classes.length;
 				if (expression.tag && expression.tag != '*') d++;
-				if (expression.pseudos) d += expression.pseudos.length;
+				if (pseudos){
+					d += pseudos.length;
+					for (var p = 0; p < pseudos.length; p++) if (pseudos[p].key == 'not'){
+						nots.push(pseudos[p].value);
+						d--;
+					}
+				}
 			}
 			s = b * 1e9 + c * 1e6 + d * 1e3;
+			for (var ii = nots.length; ii--;) s += this.specificity(nots[ii]);
 			if (s > specificity) specificity = s;
 		}
 		return specificity;
