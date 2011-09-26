@@ -4,6 +4,8 @@ define(['Slick/Parser'], function(Slick){
 return {
 
 	// http://www.w3.org/TR/CSS2/cascade.html#specificity
+	// http://www.w3.org/TR/css3-selectors/#specificity
+	// doesn't support :not() (yet)
 	specificity: function(selector){
 		var parsed = Slick.parse(selector);
 		var expressions = parsed.expressions;
@@ -14,6 +16,7 @@ return {
 				var expression = expressions[j][i];
 				if (expression.id) b++;
 				if (expression.attributes) c += expression.attributes.length;
+				if (expression.classes) c += expression.classes.length;
 				if (expression.tag && expression.tag != '*') d++;
 				if (expression.pseudos) d += expression.pseudos.length;
 			}
