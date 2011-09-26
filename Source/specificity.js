@@ -25,7 +25,7 @@ return {
 					}
 				}
 			}
-			s = b * 1e9 + c * 1e6 + d * 1e3;
+			s = b * 1e6 + c * 1e3 + d;
 			for (var ii = nots.length; ii--;) s += this.specificity(nots[ii]);
 			if (s > specificity) specificity = s;
 		}
