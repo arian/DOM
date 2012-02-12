@@ -2,7 +2,7 @@
  * A DOM Node wrapper
  */
 
-define(['Base/Core/Class', 'Base/Class/Store'], function(Class, Store){
+define(['Base/Class', 'Base/Class/Store'], function(Class, Store){
 
 var Node = Class({
 
