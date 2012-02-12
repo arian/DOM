@@ -1,5 +1,10 @@
 
-define(['./Node', 'Base/Utility/Array'], function(Node, Array){
+define([
+	'Base/Accessor',
+	'Base/Utility/Array',
+	'Base/Utility/Object',
+	'../Node',
+], function(Accessor, Array, Object, Node){
 
 var addEventListener = document.documentElement.addEventListener ? function(node, type, fn, useCapture){
 	node.addEventListener(type, fn, useCapture);
@@ -30,12 +35,17 @@ Node.implement({
 
 		var allListeners = this.retrieve('_events', {});
 
+		var wrapper = Node.lookupEventWrapper(type);
+
 		var listeners = allListeners[type] || (allListeners[type] = {
 			listeners: [],
+			wrapper: wrapper,
 			listener: function(){
+				var args = Array.slice(arguments);
+				if (args[0] && listeners.wrapper) args[0] = new listeners.wrapper(args[0]);
 				for (var i = 0; i < listeners.listeners.length; i++){
 					var fn = listeners.listeners[i];
-					fn && fn.apply(self, arguments);
+					fn && fn.apply(self, args);
 				}
 			}
 		});
@@ -44,7 +54,7 @@ Node.implement({
 			addEventListener(node, type, listeners.listener, !!captures[type]);
 		}
 
-		listeners.listeners.push(fn);
+		listeners.listeners.push(listener);
 
 		return {
 			remove: function(){
@@ -63,6 +73,8 @@ Node.implement({
 	}
 
 });
+
+Object.append(Node, new Accessor('EventWrapper'));
 
 return Node;
 

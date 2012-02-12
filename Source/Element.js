@@ -1,5 +1,5 @@
 
-define(['./Node', './select', 'Base/Core/Class', 'Slick/Finder'], function(Node, select, Class, Slick){
+define(['./Node', './select', 'Base/Class', 'Slick/Finder'], function(Node, select, Class, Slick){
 
 var Element = new Class({
 	Extends: Node,
@@ -7,7 +7,7 @@ var Element = new Class({
 });
 
 Element.prototype.toString = function(){
-	var node = this.node, 
+	var node = this.node,
 		tag = node.tagName.toLowerCase(),
 		id = node.id,
 		className = node.className;
