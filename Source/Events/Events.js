@@ -58,14 +58,14 @@ Node.implement({
 
 		return {
 			remove: function(){
-				Array.erase(listeners.listeners, fn);
+				Array.erase(listeners.listeners, listener);
 				if (listeners.listeners.length == 0){
 					removeEventListener(node, type, listeners.listener, !!captures[type]);
 				}
 				return this;
 			},
 			fire: function(){
-				fn.call(self);
+				listener.call(self);
 				return this;
 			}
 		};
