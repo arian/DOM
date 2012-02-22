@@ -1,5 +1,10 @@
 
-define(['../Element', 'Base/Host/Array', 'Base/Utility/Object'], function(Element, Array, Object){
+define([
+	'../Element',
+	'Base/Host/Array',
+	'Base/Utility/Object',
+	'Base/Utility/String'
+], function(Element, Array, Object, String){
 
 Element.addAccessor('Getter').addAccessor('Setter');
 
